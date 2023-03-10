@@ -16,9 +16,14 @@ namespace OpenCLExample01
     {
         static void Main()
         {
+            MainAsync().Wait();
+        }
+        async static Task MainAsync()
+        {
             Console.WriteLine("Running the benchmark");
 
-            OpenCLCodeSquares().Wait();
+            OpenCLSquaresSample().Wait();
+            var primesHW = await GetPrimesWithGPU();
             Console.ReadKey();
             return;
             // 2 million
@@ -137,7 +142,7 @@ namespace OpenCLExample01
             }
         }
 
-        static async Task OpenCLCodeSquares()
+        static async Task OpenCLSquaresSample()
         {
             Console.WriteLine("NetCore Wrapper (squares)");
             // Gets all available platforms and their corresponding devices, and prints them out in a table
@@ -196,9 +201,10 @@ namespace OpenCLExample01
                 }
             }
         }
-        static async Task OpenCLCodePrimes()
+
+        static async Task<List<int>> GetPrimesWithGPU()
         {
-            Console.WriteLine("NetCore Wrapper (Primes)");
+            Console.WriteLine("NetCore Wrapper (primes)");
             // Gets all available platforms and their corresponding devices, and prints them out in a table
             IEnumerable<OpenCl.DotNetCore.Platforms.Platform> platforms = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms();
 
@@ -212,10 +218,20 @@ namespace OpenCLExample01
             {
                 // Creates the kernel code, which multiplies a matrix with a vector
                 string code = @"
-                    __kernel void square(__global float* given) {
-                        int i = get_global_id(0);
-                        given[i] = given[i] * given[i];
-                        //printf(""in kernel: %d\r\n"", i);
+                    __kernel void square(__global int* given) {
+                        int index = get_global_id(0);
+
+                        int upperl=(int)sqrt((float)given[index]);
+                        for(int i=2;i<=upperl;i++)
+                        {
+                            if(given[index]%i==0)
+                            {
+                                //printf("" %d / %d\n"",index,i );
+                                given[index]=0;
+                                return;
+                            }
+                        }
+                        //printf("" % d"",index);
                     }";
 
                 // Creates a program and then the kernel from it
@@ -224,23 +240,25 @@ namespace OpenCLExample01
                     using (var kernel = program.CreateKernel("square"))
                     {
                         // Creates the memory objects for the input arguments of the kernel
-                        var source = Enumerable.Range(0, 200).Select(v => (float)v).ToArray();
+                        var source = Enumerable.Range(0, 200).Select(v => (int)v).ToArray();
                         MemoryBuffer given = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, source);
-                        MemoryBuffer resultBuffer = context.CreateBuffer<float>(MemoryFlag.WriteOnly, source.Length);
 
                         // Tries to execute the kernel
                         try
                         {
                             // Sets the arguments of the kernel
                             kernel.SetKernelArgument(0, given);
-                            kernel.SetKernelArgument(1, resultBuffer);
+                            //kernel.SetKernelArgument(1, resultBuffer);
 
                             // Creates a command queue, executes the kernel, and retrieves the result
                             using (var commandQueue = OpenCl.DotNetCore.CommandQueues.CommandQueue.CreateCommandQueue(context, chosenDevice))
                             {
                                 commandQueue.EnqueueNDRangeKernel(kernel, 1, source.Length); ;
-                                float[] resultArray = await commandQueue.EnqueueReadBufferAsync<float>(resultBuffer, source.Length);
-                                Console.WriteLine($"Result: ({string.Join(", ", resultArray)})");
+                                int[] resultArray = await commandQueue.EnqueueReadBufferAsync<int>(given, source.Length);
+
+                                given.Dispose();
+                                return resultArray.ToList();
+                                //Console.WriteLine($"Result: ({string.Join(", ", resultArray)})");
                             }
                         }
                         catch (OpenClException exception)
@@ -250,11 +268,12 @@ namespace OpenCLExample01
 
                         // Disposes of the memory objects
                         given.Dispose();
-                        resultBuffer.Dispose();
                     }
                 }
             }
+            return null;
         }
+
         static void OpenCLCode()
         {
             Console.WriteLine("AddArray using OpenCL");
