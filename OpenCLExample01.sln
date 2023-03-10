@@ -5,8 +5,6 @@ VisualStudioVersion = 17.4.33213.308
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OpenCLExample01", "OpenCLExample01\OpenCLExample01.csproj", "{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCLlib", "OpenCLlib\OpenCLlib.csproj", "{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OpenCl.DotNetCore", "opencl-dotnet\OpenCl.DotNetCore\OpenCl.DotNetCore.csproj", "{66A7AD4F-AD7C-4766-A159-83CCB750665D}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OpenCl.DotNetCore.Interop", "opencl-dotnet\OpenCl.DotNetCore.Interop\OpenCl.DotNetCore.Interop.csproj", "{DDE36FCF-726D-43B0-BE26-2D6D864059EB}"
@@ -23,10 +21,6 @@ Global
 		{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}.Release|Any CPU.Build.0 = Release|Any CPU
-		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Release|Any CPU.Build.0 = Release|Any CPU
 		{66A7AD4F-AD7C-4766-A159-83CCB750665D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{66A7AD4F-AD7C-4766-A159-83CCB750665D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{66A7AD4F-AD7C-4766-A159-83CCB750665D}.Release|Any CPU.ActiveCfg = Release|Any CPU

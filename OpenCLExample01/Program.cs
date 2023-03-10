@@ -1,14 +1,10 @@
-﻿using Cloo;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using OpenCL_2;
 using System.Reflection;
-using OpenCL.NetCore;
 using ConsoleTables;
 using OpenCl.DotNetCore.Memory;
 using OpenCl.DotNetCore;
-using OpenCL.NetCore.Extensions;
 
 namespace OpenCLExample01
 {
@@ -34,10 +30,12 @@ namespace OpenCLExample01
             var multiplication = await OpenCLBinaryOperator(new float[] { 1, 2, 3, 4, 5, 6 }, new float[] { 100, 100, 100, 100, 100, 100 }, "*");
             Console.WriteLine($"Multiplier: {string.Join(", ", multiplication)}"); AddSpacer();
 
+            // Kernel from Project File kernel.c can be fetched using System.IO.File.ReadAllText("kernel.c");
+
             Console.WriteLine("Running the prime number tests");
 
             // 2 million
-            var limit = 2_000_000;
+            var limit = 20_000_000;
             await GetPrimesWithOpenCL(limit, platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault());
             //await GetPrimesWithOpenCL(limit, platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Cpu).FirstOrDefault());
             //await GetPrimesWithOpenCL(limit, platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault());
