@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
 
-namespace OpenCL
+namespace OpenCL_2
 {
     public class EasyCL
     {
@@ -185,7 +185,7 @@ namespace OpenCL
         /// <summary>
         /// Subsequent calls to Invoke work faster without arguments
         /// </summary>
-        public void Invoke(string Method, long Offset, long Worksize)
+        public ComputeCommandQueue Invoke(string Method, long Offset, long Worksize)
         {
             if (LastKernel == null) throw new InvalidOperationException("You need to call Invoke with arguments before. All Arguments are saved");
 
@@ -198,6 +198,7 @@ namespace OpenCL
             eventList[0].Aborted += (sender, e) => EasyCL_Aborted(sender, Method);
 
             queue.Finish();
+            return queue;
         }
 
         public void Invoke(string Method, long Offset, long Worksize, params object[] Args)

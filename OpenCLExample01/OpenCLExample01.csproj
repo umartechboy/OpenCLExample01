@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\opencl-dotnet\OpenCl.DotNetCore.Tests\OpenCl.DotNetCore.Tests.csproj" />
     <ProjectReference Include="..\OpenCLlib\OpenCLlib.csproj" />
   </ItemGroup>
 

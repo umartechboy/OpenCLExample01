@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace OpenCL
+namespace OpenCL_2
 {
     internal class AsyncManualResetEvent
     {

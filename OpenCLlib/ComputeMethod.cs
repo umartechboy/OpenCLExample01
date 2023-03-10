@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace OpenCL
+namespace OpenCL_2
 {
 
     //Fixed method on CPU or GPU

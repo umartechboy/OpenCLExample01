@@ -2,8 +2,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using OpenCL;
+using OpenCL_2;
 using System.Reflection;
+using OpenCL.NetCore;
+using ConsoleTables;
+using OpenCl.DotNetCore.Memory;
+using OpenCl.DotNetCore;
+using OpenCL.NetCore.Extensions;
 
 namespace OpenCLExample01
 {
@@ -13,7 +18,8 @@ namespace OpenCLExample01
         {
             Console.WriteLine("Running the benchmark");
 
-            OpenCLCode();
+            OpenCLCode3();
+            Console.ReadKey();
             return;
             // 2 million
             var limit = 2_00;
@@ -42,6 +48,157 @@ namespace OpenCLExample01
             Console.ReadLine();
         }
 
+        async static void OpenCLCode3()
+        {
+            // Gets all available platforms and their corresponding devices, and prints them out in a table
+            IEnumerable<OpenCl.DotNetCore.Platforms.Platform> platforms = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms();
+            ConsoleTable consoleTable = new ConsoleTable("Platform", "OpenCL Version", "Vendor", "Device", "Driver Version", "Bits", "Memory", "Clock Speed", "Available");
+            foreach (var platform in platforms)
+            {
+                foreach (var device in platform.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All))
+                {
+                    consoleTable.AddRow(
+                        platform.Name,
+                        $"{platform.Version.MajorVersion}.{platform.Version.MinorVersion}",
+                        platform.Vendor,
+                        device.Name,
+                        device.DriverVersion,
+                        $"{device.AddressBits} Bit",
+                        $"{Math.Round(device.GlobalMemorySize / 1024.0f / 1024.0f / 1024.0f, 2)} GiB",
+                        $"{device.MaximumClockFrequency} MHz",
+                        device.IsAvailable ? "✔" : "✖");
+                }
+            }
+            Console.WriteLine("Supported Platforms & Devices:");
+            consoleTable.Write(Format.Alternative);
+
+            // Gets the first available platform and selects the first device offered by the platform and prints out the chosen device
+            var chosenDevice = platforms?.FirstOrDefault()?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault();
+            Console.WriteLine($"Using: {chosenDevice?.Name} ({chosenDevice?.Vendor})");
+            Console.WriteLine();
+
+            // Creats a new context for the selected device
+            using (var context = OpenCl.DotNetCore.Contexts.Context.CreateContext(chosenDevice))
+            {
+                // Creates the kernel code, which multiplies a matrix with a vector
+                string code = @"
+                    __kernel void matvec_mult(__global float4* matrix,
+                                              __global float4* vector,
+                                              __global float* result) {
+                        int i = get_global_id(0);
+                        result[i] = dot(matrix[i], vector[0]);
+                        printf(""in kernel: %d\r\n"", i);
+                    }";
+
+                // Creates a program and then the kernel from it
+                using (var program = await context.CreateAndBuildProgramFromStringAsync(code))
+                {
+                    using (var kernel = program.CreateKernel("matvec_mult"))
+                    {
+                        // Creates the memory objects for the input arguments of the kernel
+                        MemoryBuffer matrixBuffer = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, new float[]
+                        {
+                             2f,  0f,  0f,  0f,
+                             0f, 2f, 0f, 0f,
+                            0f, 0f, 2f, 0f,
+                            0f, 0f, 0f, 2f
+                        });
+                        MemoryBuffer vectorBuffer = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, new float[]
+                        { 0f, 3f, 6f, 9f });
+                        MemoryBuffer resultBuffer = context.CreateBuffer<float>(MemoryFlag.WriteOnly, 4);
+
+                        // Tries to execute the kernel
+                        try
+                        {
+                            // Sets the arguments of the kernel
+                            kernel.SetKernelArgument(0, matrixBuffer);
+                            kernel.SetKernelArgument(1, vectorBuffer);
+                            kernel.SetKernelArgument(2, resultBuffer);
+
+                            // Creates a command queue, executes the kernel, and retrieves the result
+                            using (var commandQueue = OpenCl.DotNetCore.CommandQueues.CommandQueue.CreateCommandQueue(context, chosenDevice))
+                            {
+                                commandQueue.EnqueueNDRangeKernel(kernel, 1, 4);
+                                float[] resultArray = await commandQueue.EnqueueReadBufferAsync<float>(resultBuffer, 4);
+                                Console.WriteLine($"Result: ({string.Join(", ", resultArray)})");
+                            }
+                        }
+                        catch (OpenClException exception)
+                        {
+                            Console.WriteLine(exception.Message);
+                        }
+
+                        // Disposes of the memory objects
+                        matrixBuffer.Dispose();
+                        vectorBuffer.Dispose();
+                        resultBuffer.Dispose();
+                    }
+                }
+            }
+        }
+        static void OpenCLCode2() {
+
+            // Initialize OpenCL
+            
+            Platform[] platforms = Cl.GetPlatformIDs(out ErrorCode er1);
+            Device[] devices = Cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, out ErrorCode er2);
+            Context context = Cl.CreateContext(null, 1, devices, null, IntPtr.Zero, out ErrorCode er3);
+            CommandQueue commandQueue = Cl.CreateCommandQueue(context, devices[0], CommandQueueProperties.None, out ErrorCode er4);
+
+            // Create kernel program
+            string kernelSource = @"
+                __kernel void square(__global float* array)
+                {
+                    int index = get_global_id(0);
+                    array[index] = array[index] * array[index];
+                    printf(""Ind %d"", index);
+                }";
+            var program = Cl.CreateProgramWithSource(context, 1, new[] { kernelSource }, null, out ErrorCode er5);
+            Cl.BuildProgram(program, 1, devices, null, null, IntPtr.Zero);
+
+            // Create kernel
+            Kernel kernel = Cl.CreateKernel(program, "square", out ErrorCode er6);
+
+            // Create and populate array
+            const int arraySize = 10;
+            float[] array = new float[arraySize];
+            for (int i = 0; i < arraySize; i++)
+            {
+                array[i] = i;
+            }
+
+            // Create memory buffer
+            var arrayBuffer = Cl.CreateBuffer(context, MemFlags.ReadOnly, arraySize * sizeof(float), out ErrorCode er7);
+
+            // Write array to buffer
+            Cl.EnqueueWriteBuffer(commandQueue, arrayBuffer, Bool.True, IntPtr.Zero, (IntPtr)(arraySize * sizeof(float)), array, 0, null, out Event writeEvent);
+
+            // Set kernel arguments
+            Cl.SetKernelArg(kernel, 0, (IntPtr)sizeof(int), arrayBuffer);
+
+            // Execute kernel
+            IntPtr[] workGroupSize = { (IntPtr)arraySize };
+            Cl.EnqueueNDRangeKernel(commandQueue, kernel, 1, new IntPtr[] { IntPtr.Zero }, workGroupSize, null, 0, null, out Event kernelEvent);
+
+            // Wait for kernel to finish executing
+            Cl.Finish(commandQueue);
+
+            // Read modified array from buffer
+            Cl.EnqueueReadBuffer(commandQueue, arrayBuffer, Bool.True, IntPtr.Zero, (IntPtr)(arraySize * sizeof(float)), array, 0, null, out Event readEvent);
+
+            // Print modified array
+            for (int i = 0; i < arraySize; i++)
+            {
+                Console.WriteLine(array[i]);
+            }
+
+            // Clean up resources
+            Cl.ReleaseKernel(kernel);
+            Cl.ReleaseProgram(program);
+            Cl.ReleaseMemObject(arrayBuffer);
+            Cl.ReleaseCommandQueue(commandQueue);
+            Cl.ReleaseContext(context);
+        }
         static void OpenCLCode()
         {
             //Generate the arrays for the demo
@@ -56,15 +213,16 @@ namespace OpenCLExample01
             }
 
             //initialize the OpenCL object
-            OpenCL.OpenCL cl = new OpenCL.OpenCL();
+            OpenCL_2.OpenCL cl = new OpenCL_2.OpenCL();
             cl.Accelerator = AcceleratorDevice.GPU;
 
             //Load the kernel from the file into a string
             string kernel = @"
-kernel void addArray(global int* a, global int* b, global int* c)
+__kernel void addArray(global int* a, global int* b, global int* c)
 {
     int id = get_global_id(0);
     c[id] = a[id] + b[id];
+printf(""%d + %d = %d\r\n"", a[id], b[id], c[id]);
 }
 ";
 
@@ -177,98 +335,6 @@ kernel void addArray(global int* a, global int* b, global int* c)
                 }
             }
             return true;
-        }
-        static ComputeContext context;
-        static ComputeCommandQueue queue;
-        static ComputeProgram program;
-
-        static string LastMethod = null;
-        static ComputeKernel LastKernel = null;
-        static string kernel;
-        static AcceleratorDevice _device;
-        public static AcceleratorDevice Accelerator
-        {
-            get
-            {
-                return _device;
-            }
-            set
-            {
-                if (value != _device)
-                {
-                    _device = value;
-                    CreateContext();
-                    if (kernel != null)
-                    {
-                        LoadKernel(kernel);
-                    }
-                }
-            }
-        }
-
-        static void CreateContext()
-        {
-            context = new ComputeContext(_device.Type, new ComputeContextPropertyList(Accelerator.Device.Platform), null, IntPtr.Zero);
-            queue = new ComputeCommandQueue(context, context.Devices[0], ComputeCommandQueueFlags.None);
-        }
-        public static void LoadKernel(string Kernel)
-        {
-            kernel = Kernel;
-            program = new ComputeProgram(context, Kernel);
-
-            try
-            {
-                program.Build(null, null, null, IntPtr.Zero);   //compile
-            }
-            catch (BuildProgramFailureComputeException)
-            {
-                string message = program.GetBuildLog(Accelerator.Device);
-                throw new ArgumentException(message);
-            }
-        }
-        static ComputeKernel CreateKernel(string Method, object[] args)
-        {
-            if (args == null) throw new ArgumentException("You have to pass an argument to a kernel");
-
-            ComputeKernel kernel;
-            if (LastMethod == Method && LastKernel != null) //Kernel caching, do not compile twice
-            {
-                kernel = LastKernel;
-            }
-            else
-            {
-                kernel = program.CreateKernel(Method);
-                LastKernel = kernel;
-            }
-            LastMethod = Method;
-
-            for (int i = 0; i < args.Length; i++)
-            {
-                Setargument(kernel, i, args[i]);
-            }
-
-            return kernel;
-        }
-
-        static void Setargument(ComputeKernel kernel, int index, object arg)
-        {
-            if (arg == null) throw new ArgumentException("Argument " + index + " is null");
-
-            Type argtype = arg.GetType();
-            if (argtype.IsArray)
-            {
-                ComputeMemory? messageBuffer = Activator.CreateInstance(typeof(ComputeBuffer<>).MakeGenericType(argtype.GetElementType()), new object[]
-                {
-                    context,
-                    ComputeMemoryFlags.ReadWrite | ComputeMemoryFlags.UseHostPointer,
-                    arg
-                }) as ComputeMemory;
-                kernel.SetMemoryArgument(index, messageBuffer); // set the array
-            }
-            else
-            {
-                typeof(ComputeKernel).GetMethod("SetValueArgument")?.MakeGenericMethod(argtype).Invoke(kernel, new object[] { index, arg });
-            }
         }
     }
 }

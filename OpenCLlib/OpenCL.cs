@@ -10,7 +10,7 @@ using System.Collections;
 using System.Reflection;
 using OpenCLlib;
 
-namespace OpenCL
+namespace OpenCL_2
 {
     public enum MemoryFlags : long
     {
