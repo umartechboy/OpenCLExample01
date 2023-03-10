@@ -18,7 +18,7 @@ namespace OpenCLExample01
         {
             Console.WriteLine("Running the benchmark");
 
-            OpenCLCode3();
+            OpenCLCodeSquares().Wait();
             Console.ReadKey();
             return;
             // 2 million
@@ -136,71 +136,128 @@ namespace OpenCLExample01
                 }
             }
         }
-        static void OpenCLCode2() {
 
-            // Initialize OpenCL
+        static async Task OpenCLCodeSquares()
+        {
+            Console.WriteLine("NetCore Wrapper (squares)");
+            // Gets all available platforms and their corresponding devices, and prints them out in a table
+            IEnumerable<OpenCl.DotNetCore.Platforms.Platform> platforms = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms();
             
-            Platform[] platforms = Cl.GetPlatformIDs(out ErrorCode er1);
-            Device[] devices = Cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, out ErrorCode er2);
-            Context context = Cl.CreateContext(null, 1, devices, null, IntPtr.Zero, out ErrorCode er3);
-            CommandQueue commandQueue = Cl.CreateCommandQueue(context, devices[0], CommandQueueProperties.None, out ErrorCode er4);
+            // Gets the first available platform and selects the first device offered by the platform and prints out the chosen device
+            var chosenDevice = platforms?.FirstOrDefault()?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault();
+            Console.WriteLine($"Using: {chosenDevice?.Name} ({chosenDevice?.Vendor})");
+            Console.WriteLine();
 
-            // Create kernel program
-            string kernelSource = @"
-                __kernel void square(__global float* array)
+            // Creats a new context for the selected device
+            using (var context = OpenCl.DotNetCore.Contexts.Context.CreateContext(chosenDevice))
+            {
+                // Creates the kernel code, which multiplies a matrix with a vector
+                string code = @"
+                    __kernel void square(__global float* given) {
+                        int i = get_global_id(0);
+                        given[i] = given[i] * given[i];
+                        //printf(""in kernel: %d\r\n"", i);
+                    }";
+
+                // Creates a program and then the kernel from it
+                using (var program = await context.CreateAndBuildProgramFromStringAsync(code))
                 {
-                    int index = get_global_id(0);
-                    array[index] = array[index] * array[index];
-                    printf(""Ind %d"", index);
-                }";
-            var program = Cl.CreateProgramWithSource(context, 1, new[] { kernelSource }, null, out ErrorCode er5);
-            Cl.BuildProgram(program, 1, devices, null, null, IntPtr.Zero);
+                    using (var kernel = program.CreateKernel("square"))
+                    {
+                        // Creates the memory objects for the input arguments of the kernel
+                        var source = Enumerable.Range(0, 200).Select(v => (float)v).ToArray();
+                        MemoryBuffer given = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, source);
+                        MemoryBuffer resultBuffer = context.CreateBuffer<float>(MemoryFlag.WriteOnly, source.Length);
 
-            // Create kernel
-            Kernel kernel = Cl.CreateKernel(program, "square", out ErrorCode er6);
+                        // Tries to execute the kernel
+                        try
+                        {
+                            // Sets the arguments of the kernel
+                            kernel.SetKernelArgument(0, given);
+                            //kernel.SetKernelArgument(1, resultBuffer);
 
-            // Create and populate array
-            const int arraySize = 10;
-            float[] array = new float[arraySize];
-            for (int i = 0; i < arraySize; i++)
-            {
-                array[i] = i;
+                            // Creates a command queue, executes the kernel, and retrieves the result
+                            using (var commandQueue = OpenCl.DotNetCore.CommandQueues.CommandQueue.CreateCommandQueue(context, chosenDevice))
+                            {
+                                commandQueue.EnqueueNDRangeKernel(kernel, 1, source.Length); ;
+                                float[] resultArray = await commandQueue.EnqueueReadBufferAsync<float>(given, source.Length);
+                                Console.WriteLine($"Result: ({string.Join(", ", resultArray)})");
+                            }
+                        }
+                        catch (OpenClException exception)
+                        {
+                            Console.WriteLine(exception.Message);
+                        }
+
+                        // Disposes of the memory objects
+                        given.Dispose();
+                        resultBuffer.Dispose();
+                    }
+                }
             }
+        }
+        static async Task OpenCLCodePrimes()
+        {
+            Console.WriteLine("NetCore Wrapper (Primes)");
+            // Gets all available platforms and their corresponding devices, and prints them out in a table
+            IEnumerable<OpenCl.DotNetCore.Platforms.Platform> platforms = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms();
 
-            // Create memory buffer
-            var arrayBuffer = Cl.CreateBuffer(context, MemFlags.ReadOnly, arraySize * sizeof(float), out ErrorCode er7);
+            // Gets the first available platform and selects the first device offered by the platform and prints out the chosen device
+            var chosenDevice = platforms?.FirstOrDefault()?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault();
+            Console.WriteLine($"Using: {chosenDevice?.Name} ({chosenDevice?.Vendor})");
+            Console.WriteLine();
 
-            // Write array to buffer
-            Cl.EnqueueWriteBuffer(commandQueue, arrayBuffer, Bool.True, IntPtr.Zero, (IntPtr)(arraySize * sizeof(float)), array, 0, null, out Event writeEvent);
-
-            // Set kernel arguments
-            Cl.SetKernelArg(kernel, 0, (IntPtr)sizeof(int), arrayBuffer);
-
-            // Execute kernel
-            IntPtr[] workGroupSize = { (IntPtr)arraySize };
-            Cl.EnqueueNDRangeKernel(commandQueue, kernel, 1, new IntPtr[] { IntPtr.Zero }, workGroupSize, null, 0, null, out Event kernelEvent);
-
-            // Wait for kernel to finish executing
-            Cl.Finish(commandQueue);
-
-            // Read modified array from buffer
-            Cl.EnqueueReadBuffer(commandQueue, arrayBuffer, Bool.True, IntPtr.Zero, (IntPtr)(arraySize * sizeof(float)), array, 0, null, out Event readEvent);
-
-            // Print modified array
-            for (int i = 0; i < arraySize; i++)
+            // Creats a new context for the selected device
+            using (var context = OpenCl.DotNetCore.Contexts.Context.CreateContext(chosenDevice))
             {
-                Console.WriteLine(array[i]);
-            }
+                // Creates the kernel code, which multiplies a matrix with a vector
+                string code = @"
+                    __kernel void square(__global float* given) {
+                        int i = get_global_id(0);
+                        given[i] = given[i] * given[i];
+                        //printf(""in kernel: %d\r\n"", i);
+                    }";
 
-            // Clean up resources
-            Cl.ReleaseKernel(kernel);
-            Cl.ReleaseProgram(program);
-            Cl.ReleaseMemObject(arrayBuffer);
-            Cl.ReleaseCommandQueue(commandQueue);
-            Cl.ReleaseContext(context);
+                // Creates a program and then the kernel from it
+                using (var program = await context.CreateAndBuildProgramFromStringAsync(code))
+                {
+                    using (var kernel = program.CreateKernel("square"))
+                    {
+                        // Creates the memory objects for the input arguments of the kernel
+                        var source = Enumerable.Range(0, 200).Select(v => (float)v).ToArray();
+                        MemoryBuffer given = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, source);
+                        MemoryBuffer resultBuffer = context.CreateBuffer<float>(MemoryFlag.WriteOnly, source.Length);
+
+                        // Tries to execute the kernel
+                        try
+                        {
+                            // Sets the arguments of the kernel
+                            kernel.SetKernelArgument(0, given);
+                            kernel.SetKernelArgument(1, resultBuffer);
+
+                            // Creates a command queue, executes the kernel, and retrieves the result
+                            using (var commandQueue = OpenCl.DotNetCore.CommandQueues.CommandQueue.CreateCommandQueue(context, chosenDevice))
+                            {
+                                commandQueue.EnqueueNDRangeKernel(kernel, 1, source.Length); ;
+                                float[] resultArray = await commandQueue.EnqueueReadBufferAsync<float>(resultBuffer, source.Length);
+                                Console.WriteLine($"Result: ({string.Join(", ", resultArray)})");
+                            }
+                        }
+                        catch (OpenClException exception)
+                        {
+                            Console.WriteLine(exception.Message);
+                        }
+
+                        // Disposes of the memory objects
+                        given.Dispose();
+                        resultBuffer.Dispose();
+                    }
+                }
+            }
         }
         static void OpenCLCode()
         {
+            Console.WriteLine("AddArray using OpenCL");
             //Generate the arrays for the demo
             const int arrayLength = 20;
             int[] a = new int[arrayLength];
@@ -218,7 +275,7 @@ namespace OpenCLExample01
 
             //Load the kernel from the file into a string
             string kernel = @"
-__kernel void addArray(global int* a, global int* b, global int* c)
+__kernel void addArray(__global int* a, __global int* b, __global int* c)
 {
     int id = get_global_id(0);
     c[id] = a[id] + b[id];
