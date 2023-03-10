@@ -20,21 +20,37 @@ namespace OpenCLExample01
         }
         async static Task MainAsync()
         {
-            Console.WriteLine("Running the benchmark");
+            ShowOpenCLInfo();
+            var platform = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms()?.FirstOrDefault();
+
+            Console.WriteLine("Running sample codes");
+            await Example_OpenCLMatrixVectorMultiplication(platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault());
+            await Example_OpenCLSquaresSample(platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault());
+
+            // List of functions is available at https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_C.html#built-in-functions
+            // Lisy of Operators is available at https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_C.html#operators
+            var addition = await OpenCLBinaryOperator(new float[] { 1, 2, 3, 4, 5, 6 }, new float[] { 100, 100, 100, 100, 100, 100 }, "+");
+            Console.WriteLine($"Adder: {string.Join(", ", addition)}"); AddSpacer();
+            var multiplication = await OpenCLBinaryOperator(new float[] { 1, 2, 3, 4, 5, 6 }, new float[] { 100, 100, 100, 100, 100, 100 }, "*");
+            Console.WriteLine($"Multiplier: {string.Join(", ", multiplication)}"); AddSpacer();
+
+            Console.WriteLine("Running the prime number tests");
 
             // 2 million
-            var limit = 20_000_000;
-            await GetPrimesWithGPU(limit);
+            var limit = 2_000_000;
+            await GetPrimesWithOpenCL(limit, platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault());
+            //await GetPrimesWithOpenCL(limit, platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Cpu).FirstOrDefault());
+            //await GetPrimesWithOpenCL(limit, platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault());
+            AddSpacer();
 
             var numbers = Enumerable.Range(0, limit).ToList();
             var watch = Stopwatch.StartNew();
-            var primeNumbersFromForeach = GetPrimeList(numbers);
+            var primeNumbersFromForeach = GetPrimeSingleCore(numbers);
             watch.Stop();
 
             var watchForParallel = Stopwatch.StartNew();
-            var primeNumbersFromParallelForeach = GetPrimeListWithParallel(numbers);
+            var primeNumbersFromParallelForeach = GetPrimesWithMultiThreads(numbers);
             watchForParallel.Stop();
-
 
             Console.WriteLine($"Classical foreach loop | Total prime numbers : {primeNumbersFromForeach.Count} | Time Taken : {watch.ElapsedMilliseconds} ms.");
             Console.WriteLine($"CPU Cores: {System.Environment.ProcessorCount} | Expected time in multi-thread: {watch.ElapsedMilliseconds / System.Environment.ProcessorCount}");
@@ -44,8 +60,11 @@ namespace OpenCLExample01
             Console.WriteLine("Press any key to exit.");
             Console.ReadLine();
         }
-
-        async static void OpenCLCode3()
+        static void AddSpacer()
+        {
+            Console.WriteLine("\r\n---------------------------------------------\r\n");
+        }
+        static void ShowOpenCLInfo()
         {
             // Gets all available platforms and their corresponding devices, and prints them out in a table
             IEnumerable<OpenCl.DotNetCore.Platforms.Platform> platforms = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms();
@@ -68,11 +87,73 @@ namespace OpenCLExample01
             }
             Console.WriteLine("Supported Platforms & Devices:");
             consoleTable.Write(Format.Alternative);
+        }
 
-            // Gets the first available platform and selects the first device offered by the platform and prints out the chosen device
-            var chosenDevice = platforms?.FirstOrDefault()?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault();
-            Console.WriteLine($"Using: {chosenDevice?.Name} ({chosenDevice?.Vendor})");
-            Console.WriteLine();
+        static async Task<float[]> OpenCLBinaryOperator(float[] Array1, float[] Array2, string operator_)
+        {
+            var platform = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms()?.FirstOrDefault();
+            var chosenDevice = platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault();
+
+            // Creats a new context for the selected device
+            using (var context = OpenCl.DotNetCore.Contexts.Context.CreateContext(chosenDevice))
+            {
+                // Creates the kernel code, which multiplies a matrix with a vector
+                string code = @"
+                    __kernel void BinOp(__global float* a, __global float* b, __global float* res) {
+                        int i = get_global_id(0);
+                        res[i] = a[i] " + operator_ + @" b[i];
+                    }";
+
+                // Creates a program and then the kernel from it
+                using (var program = await context.CreateAndBuildProgramFromStringAsync(code))
+                {
+                    using (var kernel = program.CreateKernel("BinOp"))
+                    {
+                        // Creates the memory objects for the input arguments of the kernel
+                        MemoryBuffer source1 = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, Array1);
+                        MemoryBuffer source2 = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, Array2);
+                        MemoryBuffer resultBuffer = context.CreateBuffer<float>(MemoryFlag.WriteOnly, Array1.Length); // lengths must match
+
+                        // Tries to execute the kernel
+                        try
+                        {
+                            // Sets the arguments of the kernel
+                            kernel.SetKernelArgument(0, source1);
+                            kernel.SetKernelArgument(1, source2);
+                            kernel.SetKernelArgument(2, resultBuffer);
+                            //kernel.SetKernelArgument(1, resultBuffer);
+
+                            // Creates a command queue, executes the kernel, and retrieves the result
+                            using (var commandQueue = OpenCl.DotNetCore.CommandQueues.CommandQueue.CreateCommandQueue(context, chosenDevice))
+                            {
+                                commandQueue.EnqueueNDRangeKernel(kernel, 1, Array1.Length); ;
+                                float[] resultArray = await commandQueue.EnqueueReadBufferAsync<float>(resultBuffer, Array1.Length);
+
+                                source1.Dispose();
+                                source2.Dispose();
+                                resultBuffer.Dispose();
+                                return resultArray;
+                            }
+                        }
+                        catch (OpenClException exception)
+                        {
+                            Console.WriteLine(exception.Message);
+                        }
+
+                        // Disposes of the memory objects
+                        source1.Dispose();
+                        source2.Dispose();
+                        resultBuffer.Dispose();
+                    }
+                }
+            }
+            return null;
+        }
+
+
+        async static Task Example_OpenCLMatrixVectorMultiplication(OpenCl.DotNetCore.Devices.Device chosenDevice)
+        {
+            Console.WriteLine("4x4 Matrix Multiplied with Vector 4. Device: " + chosenDevice.Name);
 
             // Creats a new context for the selected device
             using (var context = OpenCl.DotNetCore.Contexts.Context.CreateContext(chosenDevice))
@@ -132,18 +213,12 @@ namespace OpenCLExample01
                     }
                 }
             }
+            AddSpacer();
         }
 
-        static async Task OpenCLSquaresSample()
+        static async Task Example_OpenCLSquaresSample(OpenCl.DotNetCore.Devices.Device chosenDevice)
         {
-            Console.WriteLine("NetCore Wrapper (squares)");
-            // Gets all available platforms and their corresponding devices, and prints them out in a table
-            IEnumerable<OpenCl.DotNetCore.Platforms.Platform> platforms = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms();
-            
-            // Gets the first available platform and selects the first device offered by the platform and prints out the chosen device
-            var chosenDevice = platforms?.FirstOrDefault()?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault();
-            Console.WriteLine($"Using: {chosenDevice?.Name} ({chosenDevice?.Vendor})");
-            Console.WriteLine();
+            Console.WriteLine("Squares with OpenCL. Device: " + chosenDevice.Name);
 
             // Creats a new context for the selected device
             using (var context = OpenCl.DotNetCore.Contexts.Context.CreateContext(chosenDevice))
@@ -162,7 +237,7 @@ namespace OpenCLExample01
                     using (var kernel = program.CreateKernel("square"))
                     {
                         // Creates the memory objects for the input arguments of the kernel
-                        var source = Enumerable.Range(0, 200).Select(v => (float)v).ToArray();
+                        var source = Enumerable.Range(0, 20).Select(v => (float)v).ToArray();
                         MemoryBuffer given = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, source);
                         MemoryBuffer resultBuffer = context.CreateBuffer<float>(MemoryFlag.WriteOnly, source.Length);
 
@@ -192,16 +267,13 @@ namespace OpenCLExample01
                     }
                 }
             }
+            AddSpacer();
         }
 
-        static async Task<List<int>> GetPrimesWithGPU(int MaxNum)
+        static async Task<List<int>> GetPrimesWithOpenCL(int MaxNum, OpenCl.DotNetCore.Devices.Device chosenDevice)
         {
+            Console.WriteLine("GetPrimes with OpenCL. Device: " + chosenDevice.Name);
             var totalSW = Stopwatch.StartNew();
-            // Gets all available platforms and their corresponding devices, and prints them out in a table
-            IEnumerable<OpenCl.DotNetCore.Platforms.Platform> platforms = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms();
-
-            // Gets the first available platform and selects the first device offered by the platform and prints out the chosen device
-            var chosenDevice = platforms?.FirstOrDefault()?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.All).FirstOrDefault();
 
             var sw = Stopwatch.StartNew();
             // Creats a new context for the selected device
@@ -209,7 +281,7 @@ namespace OpenCLExample01
             {
                 // Creates the kernel code, which multiplies a matrix with a vector
                 string code = @"
-                    __kernel void square(__global int* result) {
+                    __kernel void getIfPrime(__global int* result) {
                         int index = get_global_id(0) + 2;
 
                         int upperl=(int)sqrt((float)index);
@@ -230,7 +302,7 @@ namespace OpenCLExample01
                 // Creates a program and then the kernel from it
                 using (var program = await context.CreateAndBuildProgramFromStringAsync(code))
                 {
-                    using (var kernel = program.CreateKernel("square"))
+                    using (var kernel = program.CreateKernel("getIfPrime"))
                     {
                         Console.WriteLine($"OpenCL | Kernel creation: {sw.ElapsedMilliseconds}ms.");
                         sw.Restart();
@@ -273,110 +345,22 @@ namespace OpenCLExample01
             }
             return null;
         }
-
-        static void OpenCLCode()
-        {
-            Console.WriteLine("AddArray using OpenCL");
-            //Generate the arrays for the demo
-            const int arrayLength = 20;
-            int[] a = new int[arrayLength];
-            int[] b = new int[arrayLength];
-            int[] c = new int[arrayLength]; //this will be the array storing the sum result
-            for (int i = 0; i < arrayLength; i++)
-            {
-                a[i] = i;
-                b[i] = i;
-            }
-
-            //initialize the OpenCL object
-            OpenCL_2.OpenCL cl = new OpenCL_2.OpenCL();
-            cl.Accelerator = AcceleratorDevice.GPU;
-
-            //Load the kernel from the file into a string
-            string kernel = @"
-__kernel void addArray(__global int* a, __global int* b, __global int* c)
-{
-    int id = get_global_id(0);
-    c[id] = a[id] + b[id];
-printf(""%d + %d = %d\r\n"", a[id], b[id], c[id]);
-}
-";
-
-            //Specify the kernel code (in our case in the variable kernel) and which function from the kernel file we intend to call
-            cl.SetKernel(kernel, "addArray");
-
-            //Specify the parameters in the same order as in the function definition
-            cl.SetParameter(a, b, c);
-
-            /*
-             *Specify the number of worker threads, 
-             * in our case the same as the number of elements since every threads processes only one element,
-             * and launch the code on the GPU
-             */
-            cl.Execute(arrayLength);
-
-
-            Console.WriteLine("Done...");
-            for (int i = 0; i < arrayLength; i++)
-            {
-                Console.WriteLine($"{a[i]} + {b[i]} = {c[i]}"); //print the result on screen
-            }
-            Console.ReadKey();
-        }
-        static string IsPrimeHW
-        {
-            get
-            {
-                return @"
-        kernel void GetIfPrime(global int* message)
-        {
-            int index = get_global_id(0);
-
-            int upperl=(int)sqrt((float)message[index]);
-            for(int i=2;i<=upperl;i++)
-            {
-                if(message[index]%i==0)
-                {
-                    //printf("" %d / %d\n"",index,i );
-                    message[index]=0;
-                    return;
-                }
-            }
-            printf("" % d"",index);
-        }";
-            }
-        }
-        static List<int> GetPrimeListWithHW_Obsolete(AcceleratorDevice Device, int upper)
-        {
-            Console.Write($"Compiling Kernel | ");
-            var watch = Stopwatch.StartNew();
-            ComputeMethod method = new ComputeMethod(IsPrimeHW, "GetIfPrime", Device);
-            watch.Stop();
-            Console.WriteLine($"Took: {watch.ElapsedMilliseconds}ms");
-            int[] values = Enumerable.Range(0, upper).ToArray();
-            watch.Restart();
-            method.Invoke(values.Length, values);
-            
-            watch.Stop();
-            var primes = values.Where(n => n != 0).ToList();
-            Console.WriteLine(Device);
-            Console.WriteLine($"GPU worker | Total prime numbers : {primes.Count} | Time Taken : {watch.ElapsedMilliseconds} ms.");
-
-            return primes;
-        }
         /// <summary>
-        /// GetPrimeList returns Prime numbers by using sequential ForEach
+        /// GetPrimeList returns Prime numbers by using sequential ForEach The least economical way of doing things around here
         /// </summary>
         /// <param name="inputs"></param>
         /// <returns></returns>
-        private static IList<int> GetPrimeList(IList<int> numbers) => numbers.Where(IsPrime).ToList();
+        private static IList<int> GetPrimeSingleCore(IList<int> numbers)
+        {
+            return numbers.Where(IsPrime).ToList();
+        }
 
         /// <summary>
-        /// GetPrimeListWithParallel returns Prime numbers by using Parallel.ForEach
+        /// GetPrimeListWithParallel returns Prime numbers by using Parallel.ForEach. Uses maximum CPU at least
         /// </summary>
         /// <param name="numbers"></param>
         /// <returns></returns>
-        private static IList<int> GetPrimeListWithParallel(IList<int> numbers)
+        private static IList<int> GetPrimesWithMultiThreads(IList<int> numbers)
         {
             var primeNumbers = new ConcurrentBag<int>();
 
