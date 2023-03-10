@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33213.308
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCLExample01", "OpenCLExample01\OpenCLExample01.csproj", "{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCLlib", "OpenCLlib\OpenCLlib.csproj", "{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EF4AB101-5500-43BE-8FFD-9DD914B76AEF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{72FEF2DF-D7FC-4843-A793-9BDFB75C1FEF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C1D6EB62-7391-4338-823E-E410D56FF10B}
+	EndGlobalSection
+EndGlobal
