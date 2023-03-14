@@ -5,6 +5,8 @@ using System.Reflection;
 using ConsoleTables;
 using OpenCl.DotNetCore.Memory;
 using OpenCl.DotNetCore;
+using System;
+using System.Net.Http.Headers;
 
 namespace OpenCLExample01
 {
@@ -12,13 +14,200 @@ namespace OpenCLExample01
     {
         static void Main()
         {
-            MainAsync().Wait();
+            Console.WriteLine("Running Sample.cs");
+            var sw = Stopwatch.StartNew();
+            Console.Write("Generating random data...");
+            GenerateSampleData();
+            Console.WriteLine($" Done in {sw.ElapsedMilliseconds}ms");
+            sw.Restart();
+            Console.Write("Running on CPU...");
+            var res1 = calculation();
+            Console.WriteLine($" Done in {sw.ElapsedMilliseconds}ms");
+            sw.Restart();
+            Console.WriteLine("Running on GPU...");
+            var t = calculationOpenCL();
+            t.Wait();
+            Console.WriteLine($"Running on GPU done in {sw.ElapsedMilliseconds}ms");
+            sw.Restart();
+            Console.Write("Checking data integrity...");
+            long correct = 0;
+            long wrong = 0;
+            var res2 = t.Result;
+            for (int i = 0; i < res2.Count; i++)
+                for (int j = 0; j < res2[i].Length; j++)
+                {
+                    if (res1[i][j] != res2[i][j])
+                        wrong++;
+                    else
+                        correct++;
+                }
+            Console.WriteLine($"Wrong: {wrong}, Correct: {correct}");
+            //MainAsync().Wait();
         }
+        //very large data of "pixcels" which I want to calucurate something on GPU
+        static List<float[]> dataPixcels = new List<float[]>();
+        //Globally referenced data. 
+        static List<float[]> dataReference = new List<float[]>();
+
+        //Output to store calculated data
+        static List<float[]> output = new List<float[]>();
+        static int maxReferencs = 1000; //Max size of dataReference
+        static int maxPixcels = 100000; //Max size of dataPixcels
+
+        public static void GenerateSampleData()
+        {
+
+            //Make dummy Data with random value for test
+            Random rnd = new System.Random();
+            //This is dataReference
+            for (int i = 0; i < maxReferencs; i++)
+            {
+                dataReference.Add(new float[] { (float)rnd.NextDouble(), (float)rnd.NextDouble(), (float)rnd.NextDouble(), (float)rnd.NextDouble(), (float)rnd.NextDouble() });
+            }
+            //This is TOO MANY data
+            for (int i = 0; i < maxPixcels * 100; i++)
+            {
+                dataPixcels.Add(new float[] { (float)rnd.NextDouble() * (maxReferencs - 1), (float)rnd.NextDouble(), (float)rnd.NextDouble() });
+            }
+        }
+
+        //I want make this function calucurated in GPU
+        public static List<float[]> calculation()
+        {
+            foreach (float[] pixcelData in dataPixcels)
+            {
+                //Determine which dataReference should be used, according to Pixcel's value
+                int index = (int)Math.Floor(pixcelData[0]);
+
+                output.Add(new float[] {
+                    dataReference[index][0] * pixcelData[1] + dataReference[index][1],
+                    dataReference[index][3] * pixcelData[2] + dataReference[index][4]
+                });
+            }
+            return output;
+        }
+        static async Task<List<float[]>> calculationOpenCL()
+        {
+            var platform = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms()?.FirstOrDefault();
+            var chosenDevice = platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault();
+            var sw = Stopwatch.StartNew();
+            Console.Write("Compiling kernel...");
+            // Creats a new context for the selected device
+            using (var context = OpenCl.DotNetCore.Contexts.Context.CreateContext(chosenDevice))
+            {
+                // Creates the kernel code, which multiplies a matrix with a vector
+                string code = @"
+                    __kernel void calculationOpenCL(__global float* dataReference, __global int* drWidthPtr, __global float* dataPixcels, __global int* dpWidthPtr, __global float* output) {
+                        int i = get_global_id(0);
+                        int drWidth = drWidthPtr[0];
+                        int dpWidth = dpWidthPtr[0];
+                        //Determine which dataReference should be used, according to Pixcel's value
+                        int index = (int)floor(dataPixcels[i * dpWidth]);
+
+                        output[2 * i + 0] = dataReference[index * drWidth + 0] * dataPixcels[i * dpWidth + 1] + dataReference[index * drWidth + 1];
+                        output[2 * i + 1] = dataReference[index * drWidth + 3] * dataPixcels[i * dpWidth + 2] + dataReference[index * drWidth + 4];
+                    }";
+
+                // Creates a program and then the kernel from it
+                using (var program = await context.CreateAndBuildProgramFromStringAsync(code))
+                {
+                    try
+                    {
+                        using (var kernel = program.CreateKernel("calculationOpenCL"))
+                        {
+                            Console.WriteLine($" done in {sw.ElapsedMilliseconds}ms");
+                            sw.Restart();
+                            Console.Write("Converting data types...");
+                            // Creates the memory objects for the input arguments of the kernel
+
+                            var dataReference_1 = new float[dataReference.Count * dataReference[0].Length];
+                            var dataPixcels_1 = new float[dataPixcels.Count * dataPixcels[0].Length];
+                            for (int i = 0; i < dataReference.Count; i++)
+                                for (int j = 0; j < dataReference[0].Length; j++)
+                                    dataReference_1[i * dataReference[0].Length + j] = dataReference[i][j];
+                                //Buffer.BlockCopy(dataReference[i], 0, dataReference_1, dataReference[0].Length * i, dataReference[0].Length);
+                            for (int i = 0; i < dataPixcels.Count; i++)
+                                for (int j = 0; j < dataPixcels[0].Length; j++)
+                                    dataPixcels_1[i * dataPixcels[0].Length + j] = dataPixcels[i][j];
+                            //Buffer.BlockCopy(dataPixcels[i], 0, dataPixcels_1, dataPixcels[0].Length * i, dataPixcels[0].Length);
+                            int[] dataReferenceWdPtr = new int[] { dataReference[0].Length };
+                            int[] dataPixcelsWdPtr = new int[] { dataPixcels[0].Length };
+
+                            Console.WriteLine($" done in {sw.ElapsedMilliseconds}ms");
+                            sw.Restart();
+                            Console.Write("Copying data to GPU memory...");
+
+                            MemoryBuffer dataReferenceBuffer = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, dataReference_1);
+                            MemoryBuffer dataReferenceWidthBuffer = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, dataReferenceWdPtr);
+                            MemoryBuffer dataPixcelsBuffer = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, dataPixcels_1);
+                            MemoryBuffer dataPixcelsWidthBuffer = context.CreateBuffer(MemoryFlag.ReadOnly | MemoryFlag.CopyHostPointer, dataPixcelsWdPtr);
+                            MemoryBuffer resultBuffer = context.CreateBuffer<float>(MemoryFlag.WriteOnly, dataPixcels.Count * 2);
+
+                            // Tries to execute the kernel
+                            try
+                            {
+                                // Sets the arguments of the kernel
+                                kernel.SetKernelArgument(0, dataReferenceBuffer);
+                                kernel.SetKernelArgument(1, dataReferenceWidthBuffer);
+                                kernel.SetKernelArgument(2, dataPixcelsBuffer);
+                                kernel.SetKernelArgument(3, dataPixcelsWidthBuffer);
+                                kernel.SetKernelArgument(4, resultBuffer);
+
+                                Console.WriteLine($" done in {sw.ElapsedMilliseconds}ms");
+                                sw.Restart();
+                                Console.Write("Running the code");
+
+                                // Creates a command queue, executes the kernel, and retrieves the result
+                                using (var commandQueue = OpenCl.DotNetCore.CommandQueues.CommandQueue.CreateCommandQueue(context, chosenDevice))
+                                {
+                                    commandQueue.EnqueueNDRangeKernel(kernel, 1, dataPixcels.Count);
+                                    Console.WriteLine($" done in {sw.ElapsedMilliseconds}ms");
+                                    sw.Restart();
+                                    Console.Write("Copying the output...");
+                                    float[] resultArray = await commandQueue.EnqueueReadBufferAsync<float>(resultBuffer, dataPixcels.Count * 2);
+
+                                    dataReferenceBuffer.Dispose();
+                                    dataPixcelsBuffer.Dispose();
+                                    dataReferenceWidthBuffer.Dispose();
+                                    resultBuffer.Dispose();
+                                    var result = new List<float[]>();
+                                    for (int i = 0; i < resultArray.Length / 2; i++)
+                                        result.Add(new float[] { resultArray[i * 2 + 0], resultArray[i * 2 + 1] });
+
+                                    Console.WriteLine($" done in {sw.ElapsedMilliseconds}ms");
+                                    return result;
+                                }
+                            }
+                            catch (OpenClException exception)
+                            {
+                                Console.WriteLine(exception.Message);
+                            }
+
+                            // Disposes of the memory objects
+                            dataReferenceBuffer.Dispose();
+                            dataPixcelsBuffer.Dispose();
+                            dataReferenceWidthBuffer.Dispose();
+                            resultBuffer.Dispose();
+                        }
+                    }
+                    catch (Exception kEx)
+                    {
+                        Console.WriteLine(kEx.Message);
+                    }
+                }
+            }
+            return null;
+        }
+
         async static Task MainAsync()
         {
             ShowOpenCLInfo();
             var platform = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms()?.FirstOrDefault();
 
+            Console.WriteLine("Running Sample.cs as it is...");
+            GenerateSampleData();
+            calculation();
+            return;
             Console.WriteLine("Running sample codes");
             await Example_OpenCLMatrixVectorMultiplication(platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault());
             await Example_OpenCLSquaresSample(platform?.GetDevices(OpenCl.DotNetCore.Devices.DeviceType.Gpu).FirstOrDefault());
@@ -86,7 +275,6 @@ namespace OpenCLExample01
             Console.WriteLine("Supported Platforms & Devices:");
             consoleTable.Write(Format.Alternative);
         }
-
         static async Task<float[]> OpenCLBinaryOperator(float[] Array1, float[] Array2, string operator_)
         {
             var platform = OpenCl.DotNetCore.Platforms.Platform.GetPlatforms()?.FirstOrDefault();
