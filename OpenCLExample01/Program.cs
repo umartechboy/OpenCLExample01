@@ -169,6 +169,7 @@ namespace OpenCLExample01
                                     dataReferenceBuffer.Dispose();
                                     dataPixcelsBuffer.Dispose();
                                     dataReferenceWidthBuffer.Dispose();
+                                    dataPixcelsWidthBuffer.Dispose();
                                     resultBuffer.Dispose();
                                     var result = new List<float[]>();
                                     for (int i = 0; i < resultArray.Length / 2; i++)
